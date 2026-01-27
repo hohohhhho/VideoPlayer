@@ -247,11 +247,6 @@ MainWindow::MainWindow(QWidget *parent)
     //         //     qDebug() << "输出文件异常";
     //         // }
 
-    //         QString secret_id("AKID66wa3JOGvPjqkRxISPfoxugecaRTYdbP");
-    //         QString secret_key("CGArQnz0rZ8XntxrbFtUyUt570hBWijY");
-    //         QString bucket("free-cos-1352337433");
-    //         QString region("ap-guangzhou");
-    //         uploadFileToCOS(inputPath,bucket,region,secret_id,secret_key);
     //     });
     //     connect(btn_srt,&QPushButton::clicked,this,[=](){
     //         QString filename=QFileDialog::getOpenFileName(this);
