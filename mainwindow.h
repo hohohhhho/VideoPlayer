@@ -3,7 +3,7 @@
 
 #include "videobutton.h"
 // #include "whisperthread.h"
-// #include "emotionanalysisworker.h"
+#include "emotionanalysisworker.h"
 
 
 #include <QAudioSource>
@@ -79,19 +79,16 @@ private:
     QMutex mutex_load_video;
     QQueue<VideoButton*> queue_load_video;//待加载的预览按钮队列
     QQueue<VideoButton*> queue_load_video_history;//待加载的历史预览按钮队列
-    // EmotionAnalysisWorker* worker_emo;
+    EmotionAnalysisWorker* worker_emo;
     QThread* thread_emo;
     QList<QRect> current_faces;
     QHash<QRect, QString> current_emotions;
     QVariantAnimation* animation_mask;
-    // RingBuffer* ringbuffer;
-    // WhisperThread* thread_whisper;
-    // int r_mask;
-    // QTimer* timer_load_video;
-    int index_list_media=-1;//当前所播放的视频在list中的索引
-    int play_mod=1;//默认顺序播放
-    bool full_screen=false;
-    bool loadingVideo=false;
+    int index_list_media = -1;//当前所播放的视频在list中的索引
+    int play_mod = 1;//默认顺序播放
+    bool full_screen = false;//是否去哪瓶
+    bool loadingVideo = false;//是否正在加载视频
+    bool user_setting_exchanged = false;//用户配置是否更改了
     QPoint current_pos;
     QSize current_size;
     QPoint start_point;

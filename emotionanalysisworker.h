@@ -15,7 +15,7 @@ public:
 
 
 public slots:
-    void processFrame(const QVideoFrame frame, const QSize &widgetSize);
+    void processFrame(const QVideoFrame &frame, const QSize &widgetSize);
     // void processImage(const QImage &image, const QSize &widgetSize);
 signals:
     void analysisCompleted(QList<QRect> faces, QHash<QRect, QString> emotions);

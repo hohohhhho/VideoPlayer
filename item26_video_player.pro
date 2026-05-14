@@ -14,6 +14,7 @@ CONFIG += c++17
 
 SOURCES += \
     contextbutton.cpp \
+    emotionanalysisworker.cpp \
     gifwidget.cpp \
     headbutton.cpp \
     main.cpp \
@@ -37,6 +38,7 @@ SOURCES += \
 
 HEADERS += \
     contextbutton.h \
+    emotionanalysisworker.h \
     gifwidget.h \
     headbutton.h \
     mainwindow.h \
@@ -68,7 +70,7 @@ FORMS += \
 #             $$PWD/thirdparty/whisper/ggml/src \
 #             $$PWD/thirdparty/whisper/ggml/include
 
-# INCLUDEPATH += F:\Download\opencv-4.x\opencv-4.x\build\install\include\
+INCLUDEPATH += $$PWD/thirdparty
 #                 D:\Qt2.0\ffmpeg\include
 
 # LIBS += -L F:\Download\opencv-4.x\opencv-4.x\build\Desktop_Qt_6_8_0_MinGW_64_bit-Release\lib\libopencv_*.dll.a\
@@ -77,7 +79,7 @@ FORMS += \
 
 # INCLUDEPATH += D:\Qt2.0\opencv\install\include
 
-# LIBS += -L D:\Qt2.0\opencv\Desktop_Qt_6_8_0_MinGW_64_bit-Release\lib\libopencv_*.dll.a
+LIBS += -L $$PWD/thirdparty/lib/libopencv_*.dll.a
 
 # LIBS += -L $$PWD/whisper.cpp/build/Desktop_Qt_6_8_0_MinGW_64_bit-Debug/src -lwhisper
 # LIBS += -L $$PWD/whisper.cpp/build/Desktop_Qt_6_8_0_MinGW_64_bit-Debug/ggml/src -lggml

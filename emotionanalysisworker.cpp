@@ -4,6 +4,8 @@
 #include <QDebug>
 #include <QScopeGuard>
 
+extern const QString currentItemPath;
+
 EmotionAnalysisWorker::EmotionAnalysisWorker(QObject *parent) : QObject(parent)
 {
     loadModels();
@@ -11,256 +13,142 @@ EmotionAnalysisWorker::EmotionAnalysisWorker(QObject *parent) : QObject(parent)
 
 void EmotionAnalysisWorker::loadModels()
 {
-    // const QString haarPath = ":/models/haarcascade/haarcascade_frontalface_default.xml";
-    // const QString emotionModelPath = ":/models/ssd.models/emotion-ferplus-8.onnx";
-    const QString haarPath = "D:/Qt2.0/study1/project2/item26_video_player/models/haarcascade/haarcascade_frontalface_default.xml";
-    // const QString yuNetPath = "D:/Qt2.0/study1/project2/item26_video_player/models/face_detection/face_detection_yunet_2023mar_int8bq.onnx";
-    const QString emotionModelPath = "D:/Qt2.0/study1/project2/item26_video_player/models/ssd.models/emotion-ferplus-8.onnx";
+    const QString yuNetPath = currentItemPath + "/models/face_detection/face_detection_yunet_2023mar.onnx";
+    const QString emotionModelPath = currentItemPath + "/models/ssd.models/emotion-ferplus-8.onnx";
 
-    if(!QFile::exists(haarPath)) {
-        qDebug() << "Haar cascade file not found:" << haarPath;
+    if(!QFile::exists(yuNetPath) || !QFile::exists(emotionModelPath)) {
+        qDebug() << "未找到模型，请检查路径";
         return;
     }
-    if(!QFile::exists(emotionModelPath)) {
-        qDebug() << "Emotion model file not found:" << emotionModelPath;
-        return;
-    }
-    // faceDetector = cv::FaceDetectorYN::create(
-    //     yuNetPath.toStdString(),
-    //     "",
-    //     cv::Size(640, 480),  // 增大输入尺寸以提高小脸检测能力
-    //     0.85f,  // 提高置信度阈值
-    //     0.4f,   // 放宽NMS阈值
-    //     5000
-    //     );
-    // try {
-    //     emotionNet = cv::dnn::readNetFromONNX(emotionModelPath.toStdString());
-    //     // 启用GPU加速
-    //     emotionNet.setPreferableBackend(cv::dnn::DNN_BACKEND_OPENCV);
-    //     emotionNet.setPreferableTarget(cv::dnn::DNN_TARGET_CPU);
 
-    //     // 验证模型是否加载成功
-    //     if (emotionNet.empty()) {
-    //         qDebug() << "Failed to load emotion model";
-    //         return;
-    //     }
-    //     modelsLoaded = true;
-    // } catch (const cv::Exception &e) {
-    //     qDebug() << "OpenCV Exception:" << e.what();
-    // }
-    // modelsLoaded = !emotionNet.empty() && !faceDetector.empty();
+    try {
+        // 参数依次为：模型路径、配置、输入尺寸（标准的为320*320）、置信度阈值(0.8)、NMS阈值(0.3)、保留前K个结果(5000)
+        faceDetector = cv::FaceDetectorYN::create(
+            yuNetPath.toStdString(),
+            "",
+            cv::Size(320, 320),
+            0.8f,
+            0.3f,
+            5000
+            );
 
-    if(faceCascade.load(haarPath.toStdString())) {
-        try {
-            emotionNet = cv::dnn::readNetFromONNX(emotionModelPath.toStdString());
-            // 启用GPU加速
-            emotionNet.setPreferableBackend(cv::dnn::DNN_BACKEND_OPENCV);
-            emotionNet.setPreferableTarget(cv::dnn::DNN_TARGET_CPU);
+        // 初始化 情绪Net
+        emotionNet = cv::dnn::readNetFromONNX(emotionModelPath.toStdString());
+        emotionNet.setPreferableBackend(cv::dnn::DNN_BACKEND_OPENCV);
+        emotionNet.setPreferableTarget(cv::dnn::DNN_TARGET_CPU);
 
-            // 验证模型是否加载成功
-            if (emotionNet.empty()) {
-                qDebug() << "Failed to load emotion model";
-                return;
-            }
-            modelsLoaded = true;
-        } catch (const cv::Exception &e) {
-            qDebug() << "OpenCV Exception:" << e.what();
-        }
-    } else {
-        qDebug() << "Failed to load Haar cascade";
+        modelsLoaded = true;
+        qDebug() << "ai模型加载成功.";
+    } catch (const cv::Exception &e) {
+        qDebug() << "捕捉到错误:" << e.what();
     }
 }
 
-void EmotionAnalysisWorker::processFrame(const QVideoFrame frame, const QSize &widgetSize)
+void EmotionAnalysisWorker::processFrame(const QVideoFrame& frame, const QSize &widgetSize)
 {
     if (!modelsLoaded || !frame.isValid()) return;
 
-    QVideoFrame cloneFrame = frame;  // 显式克隆
+    QVideoFrame cloneFrame = frame;
     if (!cloneFrame.map(QVideoFrame::ReadOnly)) return;
+    QImage image = cloneFrame.toImage().convertToFormat(QImage::Format_RGB888);
+    cv::Mat originalBgr;
+    cv::Mat rgbFrame(image.height(), image.width(), CV_8UC3, (void*)image.bits(), image.bytesPerLine());
+    cv::cvtColor(rgbFrame, originalBgr, cv::COLOR_RGB2BGR);
+    cloneFrame.unmap();
 
-    // 使用智能指针管理图像数据
-    auto image = std::make_shared<QImage>(
-        cloneFrame.toImage().convertToFormat(QImage::Format_RGB888)
-        );
+    const int targetDim = 640;
+    double scale = 1.0;
+    cv::Mat detectionMat;
 
-    cloneFrame.unmap();  // 立即解除映射
+    if (originalBgr.cols > targetDim || originalBgr.rows > targetDim) {
+        scale = static_cast<double>(targetDim) / std::max(originalBgr.cols, originalBgr.rows);
+        cv::resize(originalBgr, detectionMat, cv::Size(), scale, scale, cv::INTER_LINEAR);
+    } else {
+        detectionMat = originalBgr.clone();
+        scale = 1.0;
+    }
 
-    // 异步处理图像
-    cv::Mat cvFrame(image->height(), image->width(), CV_8UC3, image->bits());
+    faceDetector->setInputSize(detectionMat.size());
+    cv::Mat faces;
+    faceDetector->detect(detectionMat, faces);
 
-    try {
-        QImage image = cloneFrame.toImage().convertToFormat(QImage::Format_RGB888);
-        cv::Mat cvFrame(
-            image.height(),
-            image.width(),
-            CV_8UC3,
-            image.bits(),
-            image.bytesPerLine()
-        );
+    QList<QRect> widgetFaces;
+    QHash<QRect, QString> emotions;
 
-        cv::cvtColor(cvFrame, cvFrame, cv::COLOR_RGB2BGR);
-
-        std::vector<cv::Rect> faces;
-        faceCascade.detectMultiScale(cvFrame, faces, 1.1, 3, 0, cv::Size(30, 30));
-        // faceCascade.detectMultiScale(
-        //     cvFrame,
-        //     faces,
-        //     1.05,  // 缩小缩放步长（提高检测密度）
-        //     5,     // 增加最小相邻矩形数（降低误检）
-        //     cv::CASCADE_FIND_BIGGEST_OBJECT | cv::CASCADE_DO_ROUGH_SEARCH,
-        //     cv::Size(100, 100),  // 最小人脸尺寸（根据应用场景调整）
-        //     cv::Size(400, 400)   // 最大人脸尺寸
-        //     );
-
-        QList<QRect> widgetFaces;
-        QHash<QRect, QString> emotions;
-
-        for(const auto &faceRect : faces) {
-            QRect widgetRect = convertToWidgetCoordinates(
-                faceRect,
-                QSize(cvFrame.cols, cvFrame.rows),
-                widgetSize
+    for (int i = 0; i < faces.rows; i++) {
+        // 获取缩放图上的坐标
+        float detX = faces.at<float>(i, 0);
+        float detY = faces.at<float>(i, 1);
+        float detW = faces.at<float>(i, 2);
+        float detH = faces.at<float>(i, 3);
+        float confidence = faces.at<float>(i, 14);
+        if (confidence < 0.6) continue;
+        // 映射回原图坐标 (关键步骤：除以 scale)
+        int realX = static_cast<int>(detX / scale);
+        int realY = static_cast<int>(detY / scale);
+        int realW = static_cast<int>(detW / scale);
+        int realH = static_cast<int>(detH / scale);
+        cv::Rect faceRect(realX, realY, realW, realH);
+        // 边界检查（防止缩放取整导致的微小越界）
+        cv::Rect safeRect = faceRect & cv::Rect(0, 0, originalBgr.cols, originalBgr.rows);
+        if (safeRect.width <= 10 || safeRect.height <= 10) continue;
+        // 情绪识别 (在原图的高像素 ROI 上进行，保证准确度)
+        cv::Mat faceROI = originalBgr(safeRect);
+        QString emotion = predictEmotion(faceROI);
+        // 转换到 UI 坐标 (传入的是相对于原图的坐标)
+        QRect widgetRect = convertToWidgetCoordinates(
+            faceRect,
+            QSize(originalBgr.cols, originalBgr.rows),
+            widgetSize
             );
-
-            cv::Mat faceROI = cvFrame(faceRect);
-            QString emotion = predictEmotion(faceROI);
-
-            widgetFaces.append(widgetRect);
-            emotions.insert(widgetRect, emotion);
-        }
-
-        emit analysisCompleted(widgetFaces, emotions);
+        widgetFaces.append(widgetRect);
+        emotions.insert(widgetRect, emotion);
     }
-    // try {
-    //     // 设置输入尺寸
-    //     faceDetector->setInputSize(cv::Size(cvFrame.cols, cvFrame.rows));
 
-    //     // 执行检测
-    //     cv::Mat faces;
-    //     faceDetector->detect(cvFrame, faces);
-
-    //     QList<QRect> widgetFaces;
-    //     QHash<QRect, QString> emotions;
-
-    //     // 解析检测结果
-    //     for(int i = 0; i < faces.rows; ++i) {
-    //         // 获取人脸矩形（x,y,w,h）
-    //         // cv::Rect faceRect(
-    //         //     faces.at<float>(i, 0),  // x
-    //         //     faces.at<float>(i, 1),  // y
-    //         //     faces.at<float>(i, 2),  // w
-    //         //     faces.at<float>(i, 3)   // h
-    //         //     );
-    //         float x1 = faces.at<float>(i, 0);
-    //         float y1 = faces.at<float>(i, 1);
-    //         float x2 = faces.at<float>(i, 2);
-    //         float y2 = faces.at<float>(i, 3);
-    //         float conf = faces.at<float>(i, 4);
-
-    //         // 跳过低置信度检测（提高阈值过滤无效结果）
-    //         if (conf < 0.7) {  // 从0.6提高到0.7
-    //             continue;
-    //         }
-
-    //         // 转换为整数坐标并计算实际宽高
-    //         int ix1 = static_cast<int>(x1);
-    //         int iy1 = static_cast<int>(y1);
-    //         int ix2 = static_cast<int>(x2);  // 新增变量
-    //         int iy2 = static_cast<int>(y2);  // 新增变量
-    //         int width = ix2 - ix1;  // 正确计算宽度
-    //         int height = iy2 - iy1; // 正确计算高度
-
-    //         // 创建Rect并约束在图像范围内
-    //         cv::Rect faceRect(ix1, iy1, width, height);
-    //         faceRect = faceRect & cv::Rect(0, 0, cvFrame.cols, cvFrame.rows);
-
-    //         // 验证区域有效性（调整最小尺寸阈值）
-    //         if (faceRect.width <= 20 || faceRect.height <= 20) { // 从10调整到20像素
-    //             qDebug() << "过滤小尺寸人脸区域：" << faceRect.size().width<<","<<faceRect.size().height;
-    //             continue;
-    //         }
-
-    //         // 坐标转换
-    //         QRect widgetRect = convertToWidgetCoordinates(
-    //             faceRect,
-    //             QSize(cvFrame.cols, cvFrame.rows),
-    //             widgetSize
-    //             );
-
-    //         // 情绪分析
-    //         cv::Mat faceROI = cvFrame(faceRect);
-    //         QString emotion = predictEmotion(faceROI);
-
-    //         widgetFaces.append(widgetRect);
-    //         emotions.insert(widgetRect, emotion);
-    //     }
-
-    //     emit analysisCompleted(widgetFaces, emotions);
-    // }
-    catch (const cv::Exception& e) {
-        qWarning() << "OpenCV Exception:" << e.what();
-    }
-    catch (const std::exception& e) {
-        qWarning() << "STD Exception:" << e.what();
-    }
+    emit analysisCompleted(widgetFaces, emotions);
 }
 
-QString EmotionAnalysisWorker::predictEmotion(const cv::Mat &faceROI)
+QString EmotionAnalysisWorker::predictEmotion(const cv::Mat& faceROI)
 {
-    cv::Mat grayFace;
-    cv::cvtColor(faceROI, grayFace, cv::COLOR_BGR2GRAY);
+    if (faceROI.empty()) return "Unknown";
 
-    // 调整尺寸
-    cv::Mat resized;
-    cv::resize(grayFace, resized, cv::Size(64, 64));
-
-    // 数值转换：先除255再减0.5
-    cv::Mat floatMat;
-    resized.convertTo(floatMat, CV_32F);
-    floatMat = floatMat / 255.0f;
-    floatMat = floatMat - 0.5f;
-
-    // 生成blob
-    cv::Mat blob = cv::dnn::blobFromImage(
-        floatMat,
-        1.0,
-        cv::Size(64, 64),
-        cv::Scalar(),
-        false,
-        false,
-        CV_32F
-        );
-
-    // 验证blob形状
-    Q_ASSERT(blob.size[1] == 1 && blob.size[2] == 64 && blob.size[3] == 64);
-    // 正确应输出：1 1 64 64
-
-    // Step5: 执行推理
-    emotionNet.setInput(blob);
-    cv::Mat prob = emotionNet.forward();
-
-    // 调试输出
-    qDebug() << "Output probabilities:";
-    for (int i = 0; i < (int)prob.total(); ++i) {
-        qDebug() << "Class" << i << ":" << prob.at<float>(i);
+    // 灰度化
+    cv::Mat gray;
+    if (faceROI.channels() == 3) {
+        cv::cvtColor(faceROI, gray, cv::COLOR_BGR2GRAY);
+    } else {
+        gray = faceROI;
     }
 
+    // 对比度增强
+    cv::Ptr<cv::CLAHE> clahe = cv::createCLAHE(2.0, cv::Size(8, 8));
+    cv::Mat equalized;
+    clahe->apply(gray, equalized);
+    // 缩放尺寸
+    cv::Mat resized;
+    cv::resize(equalized, resized, cv::Size(64, 64), 0, 0, cv::INTER_AREA);
+    // 归一化
+    cv::Mat blob = cv::dnn::blobFromImage(resized, 1.0, cv::Size(64, 64), cv::Scalar(0), false, false);
+    // 推理
+    emotionNet.setInput(blob);
+    cv::Mat prob = emotionNet.forward();
+    // 解析结果
     cv::Point classIdPoint;
     double confidence;
     cv::minMaxLoc(prob, nullptr, &confidence, nullptr, &classIdPoint);
+    int classId = classIdPoint.x;
 
-    const static QStringList emotions = {
-        "Neutral", "Happy", "Surprise", "Sad",
+    static const QStringList emotionLabels = {// 标签映射
+        "Neutral", "Happiness", "Surprise", "Sadness",
         "Anger", "Disgust", "Fear", "Contempt"
     };
 
-    int classId = classIdPoint.x;
-    if (classId >= 0 && classId < emotions.size()) {
-        qDebug() << "Predicted emotion:" << emotions[classId] << "with confidence:" << confidence;
-        return emotions[classId];
+    if (classId >= 0 && classId < emotionLabels.size()) {
+        return emotionLabels[classId];
     }
-    return "Unknown";
+    return "Neutral";
 }
+
 QRect EmotionAnalysisWorker::convertToWidgetCoordinates(const cv::Rect &faceRect,const QSize &frameSize,const QSize &widgetSize)
 {
     // 计算实际显示区域

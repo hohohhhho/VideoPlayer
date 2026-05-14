@@ -16,6 +16,13 @@ void HeadButton::paintEvent(QPaintEvent *ev)
 {
     Q_UNUSED(ev);
     QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing);
+    // painter.setPen(Qt::NoPen);
+    // painter.fillRect(rect(), Qt::transparent);
+    // painter.setBrush(color_background);
+    // painter.drawRoundedRect(rect(), 8, 8);
+    // painter.setBrush(color_normal);
+    // painter.drawRoundedRect(x_start, 0, w_btn*4, height(), 8, 8);
     painter.fillRect(this->rect(),color_background);
     painter.fillRect(x_start,0,w_btn*4,height(),color_normal);
     if(this->index_hovering>=0 && index_hovering<4){

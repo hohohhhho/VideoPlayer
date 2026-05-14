@@ -14,20 +14,6 @@ QMutex mutex_animation_show_box;
 MyVideoWidget::MyVideoWidget(QWidget *parent)
     : QWidget{parent}
 {
-    // QStackedLayout* layout=new QStackedLayout(this);
-    // layout->setStackingMode(QStackedLayout::StackAll);
-
-    // group_show_box=new QSequentialAnimationGroup(this);
-    // video_widget=new MiniVideo(this);
-    // container=new QWidget(this);
-    // w_box=new QWidget(this);
-
-    // layout->addWidget(video_widget);
-    // layout->addWidget(container);
-    // container->setLayout(new QVBoxLayout);
-    // container->layout()->addWidget(w_box);
-
-    // container->stackUnder(video_widget);
     main_layout=new QVBoxLayout(this);
     main_layout->setContentsMargins(0,0,0,0);
     main_layout->setSpacing(0);
@@ -64,7 +50,6 @@ MyVideoWidget::MyVideoWidget(QWidget *parent)
     });
 
     this->setMouseTracking(true);
-    // video_widget->installEventFilter(this);
 }
 
 MyVideoWidget::~MyVideoWidget()
@@ -159,7 +144,7 @@ void MyVideoWidget::updateCurrentTime(QTime time)
 {
     // qDebug()<<"update time"<<time<<"label"<<label_srt->text();
     // qDebug()<<"list size"<<list_srt.size();
-    for(SrtFile* file:list_srt){
+    for(SrtFile*& file : list_srt){
         if(time>file->end && label_srt->text()==file->text){
             label_srt->setVisible(false);
         }

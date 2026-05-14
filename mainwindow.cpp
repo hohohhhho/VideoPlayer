@@ -36,6 +36,10 @@
 #include <QHttpPart>
 #include <QMessageAuthenticationCode>
 
+#define EMOTION_ANALYSIS_INTERVAL 100//情绪识别间隔
+
+inline const QString currentItemPath = "D:/p1/QtProject/VideoPlayer";
+
 QMutex mutex_user_list,mutex_frame;
 QVector<QPair< QString,QList< QPair<QString,QString> > >> user_lists;//用户的视频列表
 /*QVector<↓>
@@ -57,14 +61,8 @@ MainWindow::MainWindow(QWidget *parent)
     this->sink=new QVideoSink(this);
     this->dlg_emotion=nullptr;
     this->thread_emo=nullptr;
-    // this->worker_emo=nullptr;
+    this->worker_emo=nullptr;
     this->manager=new QNetworkAccessManager(this);
-    // this->ringbuffer=new RingBuffer;
-    // this->thread_whisper=new WhisperThread(ringbuffer,this);
-
-    // connect(thread_whisper,&WhisperThread::newText,this,[=](QString text){
-    //     qDebug()<<text;
-    // });
 
     this->dir_save_history=QDir::currentPath()+"/data/history";
     ui->set_widget->edit_save_file->setText(dir_save_history);
@@ -75,13 +73,6 @@ MainWindow::MainWindow(QWidget *parent)
 
     player->setAudioOutput(audio);
     player->setVideoSink(sink);
-    // player->setVideoOutput(ui->widget_video->video_widget);
-
-    // QPushButton* btn_sink=new QPushButton;
-    // btn_sink->show();
-    // connect(btn_sink,&QPushButton::clicked,this,[=](){
-    //     player->setVideoSink(sink);
-    // });
 
     ui->stackedWidget->setCurrentIndex(0);
     ui->stackedWidget_2->setCurrentIndex(0);
@@ -90,9 +81,6 @@ MainWindow::MainWindow(QWidget *parent)
     ui->btn_tool->setVisible(false);
     ui->btn_list->setVisible(false);
     ui->btn_open->setVisible(false);
-    // QMovie* movie=new QMovie(ui->label_gif);
-    // movie->setFileName(":/res/music_playing");
-    // ui->label_gif->setMovie(movie);
     ui->stackedWidget_2->setStyleSheet("QWidget{"
                                        "background-color:transparent;"
                                        "}"
@@ -118,144 +106,101 @@ MainWindow::MainWindow(QWidget *parent)
         }
     });
     // //ai模块
-    // {
-    //     QPushButton* btn_emo=new QPushButton("情绪识别",ui->scrollAreaWidgetContents_ai);
-    //     QPushButton* btn_ffmpeg=new QPushButton("ffmpeg",ui->scrollAreaWidgetContents_ai);
-    //     QPushButton* btn_srt=new QPushButton("设置srt字幕",ui->scrollAreaWidgetContents_ai);
-    //     QVBoxLayout* layout=dynamic_cast<QVBoxLayout*>(ui->scrollAreaWidgetContents_ai->layout());
-    //     btn_emo->setCheckable(true);
-    //     if(layout){
-    //         layout->insertWidget(0,btn_emo);
-    //         layout->insertWidget(1,btn_ffmpeg);
-    //         layout->insertWidget(2,btn_srt);
-    //     }
-    //     connect(btn_emo,&QPushButton::clicked,this,[=](){
-    //         mutex_dlg_emotion.lock();
-    //         if(dlg_emotion){
-    //             delete dlg_emotion;
-    //             dlg_emotion=nullptr;
-    //         }
-    //         mutex_dlg_emotion.unlock();
-    //         if(thread_emo){
-    //             thread_emo->quit();
-    //             thread_emo->wait();
-    //             delete thread_emo;
-    //             thread_emo=nullptr;
-    //         }
-    //         if(worker_emo){
-    //             delete worker_emo;
-    //             worker_emo=nullptr;
-    //         }
-    //         if(btn_emo->isChecked()){
-    //             this->thread_emo = new QThread(this);
-    //             // this->worker_emo = new EmotionAnalysisWorker();
+    {
+        QPushButton* btn_emo=new QPushButton("情绪识别",ui->scrollAreaWidgetContents_ai);
+        QPushButton* btn_ffmpeg=new QPushButton("ffmpeg",ui->scrollAreaWidgetContents_ai);
+        QPushButton* btn_srt=new QPushButton("设置srt字幕",ui->scrollAreaWidgetContents_ai);
+        QVBoxLayout* layout=dynamic_cast<QVBoxLayout*>(ui->scrollAreaWidgetContents_ai->layout());
+        btn_emo->setCheckable(true);
+        if(layout){
+            layout->insertWidget(0,btn_emo);
+            layout->insertWidget(1,btn_ffmpeg);
+            layout->insertWidget(2,btn_srt);
+        }
+        connect(btn_emo,&QPushButton::clicked,this,[=](){
+            if(!btn_emo->isChecked()){
+                if(dlg_emotion){
+                    dlg_emotion->setVisible(false);
+                }
+                return;
+            }
+            if(dlg_emotion){
+                delete dlg_emotion;
+                dlg_emotion=nullptr;
+            }
+            if(thread_emo){
+                thread_emo->quit();
+                thread_emo->wait();
+                delete thread_emo;
+                thread_emo=nullptr;
+            }
+            if(worker_emo){
+                delete worker_emo;
+                worker_emo=nullptr;
+            }
+            // mutex_dlg_emotion.unlock();
+            // mutex_dlg_emotion.lock();
+            this->thread_emo = new QThread(this);
+            this->worker_emo = new EmotionAnalysisWorker();
+            this->dlg_emotion=new QDialog(this);
+            dlg_emotion->setWindowFlag(Qt::FramelessWindowHint);
+            dlg_emotion->show();
+            //给情绪识别的线程传递帧信息
+            connect(sink, &QVideoSink::videoFrameChanged, worker_emo, [=](const QVideoFrame &frame){
+                static QElapsedTimer etimer;
+                if(!etimer.isValid()){
+                    etimer.start();
+                }
+                int interval=etimer.elapsed();
+                if(interval >= EMOTION_ANALYSIS_INTERVAL){//控制帧率
+                    etimer.restart();
+                    mutex_frame.lock();
+                    QVideoFrame cloneframe = frame;
+                    mutex_frame.unlock();
+                    worker_emo->processFrame(cloneframe, ui->widget_video->video_widget->size());
+                }
+            },Qt::QueuedConnection);
 
-    //             mutex_dlg_emotion.lock();
-    //             this->dlg_emotion=new QDialog(this);
-    //             dlg_emotion->setWindowFlag(Qt::FramelessWindowHint);
-    //             dlg_emotion->show();
-    //             mutex_dlg_emotion.unlock();
-    //             //给情绪识别的线程传递帧信息
-    //             connect(sink, &QVideoSink::videoFrameChanged,worker_emo,[=](const QVideoFrame &frame){
-    //                 static QElapsedTimer etimer;
-    //                 if(!etimer.isValid()){
-    //                     etimer.start();
-    //                 }
-    //                 int interval=etimer.elapsed();
-    //                 if(interval>300){
-    //                     etimer.restart();
-    //                     mutex_frame.lock();
-    //                     QVideoFrame cloneframe=frame;
-    //                     mutex_frame.unlock();
-    //                     worker_emo->processFrame(cloneframe,ui->widget_video->video_widget->size());
-    //                 }
-    //                 // static std::atomic<int> counter=10;
-    //                 // counter.fetch_add(1,std::memory_order_relaxed);
-    //                 // if(counter.load(std::memory_order_relaxed)>10){
-    //                 //     counter.fetch_sub(10,std::memory_order_relaxed);
-    //                 //     mutex_frame.lock();
-    //                 //     QVideoFrame cloneframe=frame;
-    //                 //     mutex_frame.unlock();
-    //                 //     worker_emo->processFrame(cloneframe,ui->widget_video->video_widget->size());
-    //                 //     qDebug()<<"传输frame";
-    //                 // }
-    //             },Qt::QueuedConnection);
+            //将识别到的信息传递回来显示在ui上
+            connect(worker_emo, &EmotionAnalysisWorker::analysisCompleted,this,[=](QList<QRect> faces, QHash<QRect, QString> emotions){
+                mutex_dlg_emotion.lock();
+                if(dlg_emotion){
+                    current_faces = std::move(faces);
+                    current_emotions = std::move(emotions);
 
-    //             //将识别到的信息传递回来显示在ui上
-    //             connect(worker_emo, &EmotionAnalysisWorker::analysisCompleted,this,[=](QList<QRect> faces, QHash<QRect, QString> emotions){
-    //                 mutex_dlg_emotion.lock();
-    //                 if(dlg_emotion){
-    //                     // qDebug()<<"接收faces";
-    //                     current_faces = std::move(faces);
-    //                     current_emotions = std::move(emotions);
+                    QBitmap mask(dlg_emotion->size());
+                    mask.fill(Qt::color0);
+                    QPainter painter(&mask);
+                    painter.setPen(QPen(Qt::color1,2));
+                    painter.setBrush(Qt::color0);
+                    painter.drawPoint(0,0);
+                    for(QRect& rect:current_faces){
+                        painter.drawRect(rect);
+                        painter.drawText(rect,current_emotions[rect]);
+                    }
 
-    //                     QBitmap mask(dlg_emotion->size());
-    //                     mask.fill(Qt::color0);
-    //                     QPainter painter(&mask);
-    //                     painter.setPen(QPen(Qt::color1,2));
-    //                     painter.setBrush(Qt::color0);
-    //                     painter.drawPoint(0,0);
-    //                     for(QRect& rect:current_faces){
-    //                         painter.drawRect(rect);
-    //                         painter.drawText(rect,current_emotions[rect]);
-    //                     }
+                    QPoint globalPos = ui->widget_video->video_widget->mapToGlobal(QPoint(0, 0));
+                    dlg_emotion->move(globalPos);
+                    dlg_emotion->resize(ui->widget_video->video_widget->size());
+                    dlg_emotion->setMask(mask);
+                }
+                mutex_dlg_emotion.unlock();
+            },Qt::DirectConnection);
 
-    //                     dlg_emotion->resize(ui->widget_video->video_widget->size());
-    //                     dlg_emotion->move(this->mapToGlobal(ui->widget_video->video_widget->pos()));
-    //                     dlg_emotion->setMask(mask);
-    //                     // dlg_emotion->update();
-    //                 }
-    //                 mutex_dlg_emotion.unlock();
-    //             },Qt::DirectConnection);
+            worker_emo->moveToThread(thread_emo);
+            thread_emo->start();
+        });
+        connect(btn_ffmpeg,&QPushButton::clicked,this,[=](){
 
-    //             worker_emo->moveToThread(thread_emo);
-    //             thread_emo->start();
-    //         }
+        });
+        connect(btn_srt,&QPushButton::clicked,this,[=](){
+            QString filename=QFileDialog::getOpenFileName(this);
+            if(QFileInfo(filename).suffix()==".srt"){
+                addSrt(filename);
+            }
 
-    //     });
-    //     connect(btn_ffmpeg,&QPushButton::clicked,this,[=](){
-    //         QString inputPath=player->source().toLocalFile();
-    //         // QString outputPath="F:/桌面/test/temp_file.pcm";
-    //         // QString ffmpegPath("D:/Qt2.0/ffmpeg/bin/ffmpeg.exe");
-    //         // if(QStandardPaths::findExecutable(ffmpegPath).isEmpty()){
-    //         //     qDebug() << "错误：未找到ffmpeg可执行文件";
-    //         //     return;
-    //         // }
-
-    //         // QProcess ffmpeg;
-    //         // QStringList args;
-
-    //         // // 3. 完整转换参数
-    //         // args <<  "-y"<<"-i"<<inputPath<<
-    //         //     "-ar"<< "16000"<< "-ac"<< "1"<<
-    //         //     "-f"<< "s16le"<< outputPath;
-
-    //         // // 4. 启动前清空旧文件
-    //         // QFile::remove(outputPath);
-
-    //         // // 5. 标准错误输出管道设置
-    //         // ffmpeg.setProcessChannelMode(QProcess::MergedChannels);
-    //         // ffmpeg.start(ffmpegPath, args);
-
-    //         // // 同步等待处理完成（异步方案需信号槽处理）
-    //         // if(!ffmpeg.waitForFinished(30000)) { // 30秒超时
-    //         //     qDebug() << "转换失败:" << ffmpeg.readAllStandardError();
-    //         //     return;
-    //         // }
-
-    //         // if(QFileInfo(outputPath).size() == 0) {
-    //         //     qDebug() << "输出文件异常";
-    //         // }
-
-    //     });
-    //     connect(btn_srt,&QPushButton::clicked,this,[=](){
-    //         QString filename=QFileDialog::getOpenFileName(this);
-    //         if(QFileInfo(filename).suffix()==".srt"){
-    //             addSrt(filename);
-    //         }
-
-    //     });
-    // }
+        });
+    }
     //倍速
     {
         QButtonGroup* group=new QButtonGroup(this);
@@ -652,14 +597,11 @@ MainWindow::MainWindow(QWidget *parent)
             this->show();
             top=!top;
         }else if(index_btn==1){
-            // showMinimized();
-
             QPoint pos=mapFromGlobal(QCursor::pos());
             this->animation_mask=new QVariantAnimation(this);
             animation_mask->setStartValue(1);
             int endvalue=std::sqrt( (width()*width()+height()*height()) );
             animation_mask->setEndValue(endvalue);
-            // qDebug()<<"endvalue"<<endvalue;
 
             animation_mask->setDuration(300);
             connect(animation_mask,&QVariantAnimation::valueChanged,this,[=](const QVariant& value){
@@ -672,7 +614,6 @@ MainWindow::MainWindow(QWidget *parent)
                 this->setMask(mask);
                 if(value.toInt()>animation_mask->endValue().toInt()*0.9){
                     this->showMinimized();
-                    // animation_mask->stop();
                 }
             });
             connect(animation_mask,&QVariantAnimation::finished,this,[=](){
@@ -691,12 +632,12 @@ MainWindow::MainWindow(QWidget *parent)
         }
     });
 
-    connect(ui->set_widget->combo_theme,&QComboBox::currentTextChanged,this,[=](QString text){
+    connect(ui->set_widget->combo_theme, &QComboBox::currentTextChanged, this, [=](QString text){
+        if(ui->set_widget->isVisible()) user_setting_exchanged = true;
         if(text=="深色"){
             ui->head_widget->changeTheme(false);
             ui->widget_video->w_box->changeTheme(false);
             this->isWhite=false;
-            // qDebug()<<"深色";
             QPalette palette;
             // 基础配色
             static const int num1=93;
@@ -760,11 +701,9 @@ MainWindow::MainWindow(QWidget *parent)
         QFontDialog* dlg=new QFontDialog(this);
         dlg->setCurrentFont(/*QApplication::font()*/QFont(font_family));
         if(dlg->exec()==QDialog::Accepted){
+            if(ui->set_widget->isVisible()) user_setting_exchanged = true;
             QFont font=dlg->currentFont();
-            // QApplication::setFont(font);
             changeFont(font.family());
-            // ui->set_widget->setStyleSheet(style);
-            // ui->edit_seek->setStyleSheet(style);
         }
         dlg->deleteLater();
     });
@@ -775,6 +714,8 @@ MainWindow::MainWindow(QWidget *parent)
             if(QMessageBox::information(this,"提示","确定更改历史记录保存路径?"
                                      ,QMessageBox::StandardButtons(QMessageBox::Yes|QMessageBox::No))
                 ==QMessageBox::StandardButton(QMessageBox::Yes)){
+
+                if(ui->set_widget->isVisible()) user_setting_exchanged = true;
                 ui->set_widget->edit_save_file->setText(url.toLocalFile());
                 this->dir_save_history=url.toLocalFile();
             }
@@ -782,13 +723,16 @@ MainWindow::MainWindow(QWidget *parent)
     });
 
     connect(ui->set_widget->spin_max_history_num,&QSpinBox::valueChanged,this,[=](int value){
+        if(ui->set_widget->isVisible()) user_setting_exchanged = true;
         this->max_history_num=value;
     });
 
     connect(ui->set_widget->btn_clear_user_data,&QPushButton::clicked,this,[=](){
-        if(QMessageBox::warning(this,"提示","确定更改背景图片?"
+        if(QMessageBox::warning(this,"提示","确定清除用户数据?"
                                      ,QMessageBox::StandardButtons(QMessageBox::Yes|QMessageBox::No))
             ==QMessageBox::StandardButton(QMessageBox::Yes)){
+
+            if(ui->set_widget->isVisible()) user_setting_exchanged = true;
             QDir dir=QDir::currentPath()+"/data";
             qDebug()<<"dir.path()"<<dir.path();
             deleteFilesFromPath(dir.path());
@@ -796,19 +740,22 @@ MainWindow::MainWindow(QWidget *parent)
         }
     });
 
-    connect(ui->set_widget->spin_max_num_load_video,&QSpinBox::valueChanged,this,[=](int value){
+    connect(ui->set_widget->spin_max_num_load_video, &QSpinBox::valueChanged, this, [=](int value){
+        if(ui->set_widget->isVisible()) user_setting_exchanged = true;
         mutex_max_num_load_video_once.lock();
         this->max_num_load_video_once=value;
         mutex_max_num_load_video_once.unlock();
     });
 
-    connect(ui->set_widget->spin_interval_load_video,&QSpinBox::valueChanged,this,[=](int value){
+    connect(ui->set_widget->spin_interval_load_video, &QSpinBox::valueChanged, this, [=](int value){
+        if(ui->set_widget->isVisible()) user_setting_exchanged = true;
         mutex_interval_load_video.lock();
         this->interval_load_video=value;
         mutex_interval_load_video.unlock();
     });
 
-    connect(ui->set_widget->spin_lumilance,&QSpinBox::valueChanged,this,[=](int value){
+    connect(ui->set_widget->spin_lumilance, &QSpinBox::valueChanged, this, [=](int value){
+        if(ui->set_widget->isVisible()) user_setting_exchanged = true;
         double lumilance=static_cast<double>(value)/100.0;
         this->min_lumilance=lumilance;
         for(QObject* oj:ui->scrollAreaWidgetContents_list->children()){
@@ -826,10 +773,12 @@ MainWindow::MainWindow(QWidget *parent)
     });
 
     connect(ui->set_widget->spin_forward,&QSpinBox::valueChanged,this,[=](int value){
+        if(ui->set_widget->isVisible()) user_setting_exchanged = true;
         this->forward_sec=value;
     });
 
     connect(ui->set_widget->spin_backward,&QSpinBox::valueChanged,this,[=](int value){
+        if(ui->set_widget->isVisible()) user_setting_exchanged = true;
         this->backward_sec=value;
     });
 
@@ -838,6 +787,7 @@ MainWindow::MainWindow(QWidget *parent)
                                      ,QMessageBox::StandardButtons(QMessageBox::Yes|QMessageBox::No))
             ==QMessageBox::StandardButton(QMessageBox::Yes)){
 
+            if(ui->set_widget->isVisible()) user_setting_exchanged = true;
             changeBackgroundkPixmap(ui->set_widget->edit_pxp_path->text());
         }
     });
@@ -849,6 +799,7 @@ MainWindow::MainWindow(QWidget *parent)
                                          ,QMessageBox::StandardButtons(QMessageBox::Yes|QMessageBox::No))
                 ==QMessageBox::StandardButton(QMessageBox::Yes)){
 
+                if(ui->set_widget->isVisible()) user_setting_exchanged = true;
                 changeBackgroundkPixmap(filename);
             }
         }
@@ -859,6 +810,7 @@ MainWindow::MainWindow(QWidget *parent)
                                      ,QMessageBox::StandardButtons(QMessageBox::Yes|QMessageBox::No))
             ==QMessageBox::StandardButton(QMessageBox::Yes)){
 
+            if(ui->set_widget->isVisible()) user_setting_exchanged = true;
             QString path(":/res/background.png");
             changeBackgroundkPixmap(path);
         }
@@ -869,34 +821,16 @@ MainWindow::MainWindow(QWidget *parent)
                                   ,QMessageBox::StandardButtons(QMessageBox::Yes|QMessageBox::No))
             ==QMessageBox::StandardButton(QMessageBox::Yes)){
 
+            user_setting_exchanged = false;
             saveUserInfo();
         }
     });
 
-
-    QTimer::singleShot(1,this,[=](){
+    QTimer::singleShot(100,this,[=](){
+        user_setting_exchanged = false;
         loadUserInfo();
         loadHistoryFromfile();
     });
-    // timer_load_video->start();
-
-    // QTimer::singleShot(10,this,[=](){
-    //     // for(QObject* oj:this->children()){
-    //     //     QWidget* w=dynamic_cast<QWidget*>(oj);
-    //     //     if(w){
-    //     //         w->setAcceptDrops(false);
-    //     //         qDebug()<<"set do not drops";
-    //     //     }
-    //     // }
-    //     ui->scrollArea->acceptDrops();
-    //     ui->widget_scroll->acceptDrops();
-    //     ui->widget_video->acceptDrops();
-    //     ui->widget_video->installEventFilter(this);
-    //     //ui->scrollArea->installEventFilter(this);
-    //     //ui->widget_scroll->installEventFilter(this);
-    // });
-
-    //this->acceptDrops();
 }
 
 MainWindow::~MainWindow()
@@ -920,13 +854,11 @@ void MainWindow::paintEvent(QPaintEvent *ev)
 {
     Q_UNUSED(ev);
     QPainter painter(this);
+    QRect titleRect = ui->head_widget->geometry();
+    painter.fillRect(titleRect, Qt::transparent);
 
-
-    // qreal ratio=QGuiApplication::primaryScreen()->devicePixelRatio();
-    // pxp_background=QPixmap(this->background_path).scaled(this->size(),Qt::IgnoreAspectRatio,Qt::SmoothTransformation);
-    // pxp.setDevicePixelRatio(ratio);
     if(!pxp_background.isNull()){
-        painter.drawPixmap(0,0,pxp_background);
+        painter.drawPixmap(0, titleRect.bottom(), pxp_background);
     }else{
         qDebug()<<"pxp_background is null";
     }
@@ -1060,15 +992,17 @@ void MainWindow::mouseReleaseEvent(QMouseEvent *ev)
 
 void MainWindow::closeEvent(QCloseEvent *ev)
 {
-    QMessageBox::StandardButton standard=QMessageBox::question(this,"提示","需要保存用户设置吗?"
-                          ,QMessageBox::StandardButtons(QMessageBox::Yes|QMessageBox::No|QMessageBox::Cancel));
-    if(standard==QMessageBox::StandardButton(QMessageBox::Yes)){
-        saveUserInfo();
-        ev->accept();
-    }else if(standard==QMessageBox::StandardButton(QMessageBox::No)){
-        ev->accept();
-    }else{
-        ev->ignore();
+    if(user_setting_exchanged){
+        QMessageBox::StandardButton standard=QMessageBox::question(this,"提示","需要保存用户设置吗?"
+                                                                     ,QMessageBox::StandardButtons(QMessageBox::Yes|QMessageBox::No|QMessageBox::Cancel));
+        if(standard==QMessageBox::StandardButton(QMessageBox::Yes)){
+            saveUserInfo();
+            ev->accept();
+        }else if(standard==QMessageBox::StandardButton(QMessageBox::No)){
+            ev->accept();
+        }else{
+            ev->ignore();
+        }
     }
 }
 
@@ -1571,7 +1505,7 @@ void MainWindow::updateSource(QString filename)
 
 
 
-        for(QObject* oj:ui->scrollAreaWidgetContents_history->children()+ui->scrollAreaWidgetContents_list->children()){//其他的预览窗口停止播放gif
+        for(QObject*& oj : ui->scrollAreaWidgetContents_history->children()+ui->scrollAreaWidgetContents_list->children()){//其他的预览窗口停止播放gif
             VideoButton* btn=dynamic_cast<VideoButton*>(oj);
             if(btn){
                 if(btn->getSource()!=filename){
@@ -1581,7 +1515,7 @@ void MainWindow::updateSource(QString filename)
                 }
             }
         }
-        for(QObject* oj:ui->scrollAreaWidgetContents_history->children()){//当点击的某条视频存在历史观看记录，把这条历史记录移到最前面
+        for(QObject* oj : ui->scrollAreaWidgetContents_history->children()){//当点击的某条视频存在历史观看记录，把这条历史记录移到最前面
             VideoButton* btn=dynamic_cast<VideoButton*>(oj);
             // qDebug()<<"child";
             if(btn){
@@ -1831,14 +1765,14 @@ void MainWindow::loadUserInfo()
                 value=oj["user_lists"];
                 if(value.isArray()){
                     QJsonArray array_file=value.toArray();//文件列表
-                    for(QJsonValueRef array_value:array_file){
+                    for(const QJsonValue &array_value : std::as_const(array_file)){
                         if(array_value.isObject()){
                             QJsonObject oj_file=array_value.toObject();//具体的文件对象
                             QString file_name=oj_file["file_name"].toString();
                             QList<QPair<QString,QString>> file_videos;
                             if(oj_file["videos"].isArray()){
                                 QJsonArray array_video=oj_file["videos"].toArray();//文件的子视频列表
-                                for(QJsonValueRef array_value:array_video){
+                                for(const QJsonValue &video_val : std::as_const(array_video)){
                                     if(array_value.isObject()){
                                         QJsonObject oj_video=array_value.toObject();//文件的具体子视频
                                         file_videos.append(qMakePair(oj_video["title"].toString(),oj_video["path"].toString()));
@@ -2003,35 +1937,6 @@ QString MainWindow::generateAuthorization(const QString &secretId, const QString
 }
 
 void MainWindow::uploadFileToCOS(const QString &filePath, const QString &bucket, const QString &region, const QString &secretId, const QString &secretKey) {
-    // QFile file(filePath);
-    // if (!file.open(QIODevice::ReadOnly)) {
-    //     qDebug() << "Failed to open file:" << filePath;
-    //     return;
-    // }
-
-    // QString key = QFileInfo(file).fileName();
-    // QString host = QString("%1.cos.%2.myqcloud.com").arg(bucket, region);
-    // QUrl url(QString("https://%1/%2").arg(host, key));
-
-    // QNetworkRequest request(url);
-    // request.setHeader(QNetworkRequest::ContentTypeHeader, "application/octet-stream");
-
-    // // 显式设置 Host 头（必须与签名中的 host 一致）
-    // request.setRawHeader("Host", host.toUtf8());
-    // request.setRawHeader("x-cos-acl", "public-read");
-
-    // QString authorization = generateAuthorization(secretId, secretKey, "PUT", key, bucket, region);
-    // request.setRawHeader("Authorization", authorization.toUtf8());
-
-    // QNetworkReply *reply = manager->put(request, file.readAll());
-    // connect(reply, &QNetworkReply::finished, [=]() {
-    //     if (reply->error() == QNetworkReply::NoError) {
-    //         qDebug() << "Upload success! URL:" << url.toString();
-    //     } else {
-    //         qDebug() << "Upload failed:" << reply->errorString() << "Response:" << reply->readAll();
-    //     }
-    //     reply->deleteLater();
-    // });
     QString objectPath = "doc/" + QFileInfo(filePath).fileName(); // 假设你上传到 doc 目录
     QString urlString = QString("https://%1.cos.%2.myqcloud.com/%3").arg(bucket, region, objectPath);
     QUrl url(urlString);
